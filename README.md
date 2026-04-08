@@ -2,6 +2,8 @@
 
 A Domino Extension that brings life sciences file formats — tabular clinical data, medical imaging, and genomics sequences — directly into the Domino project sidebar. Each user sees only the datasets they are authorised to access, using Domino's Extended Identity Propagation.
 
+When launched from a project sidebar, the app greets users with a welcome banner explaining its purpose and the supported formats. If a dataset contains no supported files, a clear empty state guides users on which formats to add.
+
 ---
 
 ## Supported File Formats
@@ -12,10 +14,10 @@ A Domino Extension that brings life sciences file formats — tabular clinical d
 Apache Parquet is a columnar storage format widely used for large analytical datasets. In life sciences it appears as the output format for processed clinical trial data, model training datasets, and pipeline results.
 
 **What the viewer shows:**
-- Paginated data table (configurable rows per page)
+- Paginated data table with configurable rows per page
 - Column filters — range, equals, contains
 - SQL-like query syntax (`AGE > 50 AND SEX == 'M'`)
-- Quick analysis tab — statistics (mean, median, std dev, min, max) and frequency distribution per column
+- Quick analysis — statistics (mean, median, std dev, min, max) and frequency distribution per column
 - Missing data visualisation — horizontal bar chart of null counts by column
 - Column visibility and sort controls
 - Download as CSV or Excel
@@ -51,7 +53,7 @@ DICOM (Digital Imaging and Communications in Medicine) is the universal standard
 - Image metadata panel — modality, study description, shape, pixel range
 - Browser-native zoom (click to expand the image)
 
-> **Note on windowing:** CT scanners measure tissue density in Hounsfield Units (HU). Air = −1000 HU, water = 0 HU, soft tissue = 20–80 HU, bone = 400–1000 HU. Windowing "stretches" a chosen HU range across the available greyscale, making structures in that range visible. The clinical presets above are optimised for CT. MRI images use arbitrary signal intensities rather than HU, so the scanner-embedded Default preset is generally best for MRI.
+> **Note on windowing:** CT scanners measure tissue density in Hounsfield Units (HU). Air = −1000 HU, water = 0 HU, soft tissue = 20–80 HU, bone = 400–1000 HU. Windowing stretches a chosen HU range across the available greyscale, making structures in that range visible. The clinical presets are optimised for CT. MRI images use arbitrary signal intensities rather than HU, so the scanner-embedded Default preset is generally best for MRI.
 
 #### NIfTI (`.nii`, `.nii.gz`)
 NIfTI (Neuroimaging Informatics Technology Initiative) is the standard format for research neuroimaging — fMRI, structural MRI, and diffusion tensor imaging. While DICOM is used in clinical/radiology workflows, NIfTI is preferred in research pipelines (FSL, SPM, FreeSurfer, ANTs).
@@ -64,34 +66,21 @@ NIfTI (Neuroimaging Informatics Technology Initiative) is the standard format fo
 
 ---
 
-### 🧬 Genomics Sequences
+### 🧬 Genomics
 
 #### FASTA (`.fasta`, `.fa`, `.fna`, `.ffn`)
 FASTA is the foundational plain-text format for biological sequences. Each record contains a header line (starting with `>`) followed by the nucleotide or amino acid sequence. Reference genomes, gene sequences, and protein databases are distributed in FASTA format.
 
-**Example record:**
-```
->NC_045512.2 Severe acute respiratory syndrome coronavirus 2, complete genome
-ATTAAAGGTTTATACCTTCCCAGGTAACAAACCAACCAACTTTCGATCTCTTGTAGATCT...
-```
-
 **What the viewer shows:**
 - **KPI metrics** — sequence count, median length, mean GC%, total bases
-- **Length distribution** histogram
-- **GC content** distribution with mean line
-- Records table — sequence ID, length, GC%, sequence preview (first 60 bases)
+- **Nucleotide composition** — A/T/G/C percentage bar chart and AT/GC pie chart (single genome)
+- **GC sliding window** — GC% plotted across the genome in configurable windows (100–2000 bp), revealing coding regions and regulatory elements (single genome)
+- **GC content distribution** histogram (multi-sequence)
+- Records table — sequence ID, length, GC%, sequence preview
 - CSV download of the summary table
 
 #### FASTQ (`.fastq`, `.fastq.gz`, `.fq`, `.fq.gz`)
 FASTQ extends FASTA by adding per-base quality scores from the sequencer. It is the primary output format of next-generation sequencing (NGS) instruments — Illumina, Oxford Nanopore, PacBio. Every sequencing run produces FASTQ files as its raw data. Gzip-compressed `.fastq.gz` files are handled natively.
-
-**Example record (4 lines per read):**
-```
-@SRR000001.1 read identifier
-ACGTACGTACGTACGT...    ← nucleotide sequence
-+
-IIIIIIIIIIIIIIII...    ← Phred quality scores (ASCII-encoded)
-```
 
 **What the viewer shows:**
 - **KPI metrics** — read count, median length, mean GC%, mean Phred quality score
@@ -102,6 +91,22 @@ IIIIIIIIIIIIIIII...    ← Phred quality scores (ASCII-encoded)
   - Q30 = 99.9% base call accuracy (1 error per 1,000 bases)
 - Records table with per-read quality scores
 - CSV download of the summary table
+
+#### VCF — Variant Call Format (`.vcf`, `.vcf.gz`)
+VCF is the standard output format of genomic variant calling pipelines (GATK, DeepVariant, etc.). It records single nucleotide polymorphisms (SNPs), insertions/deletions (INDELs), and structural variants identified by comparing a sample to a reference genome. Used in cancer genomics, rare disease research, pharmacogenomics, and clinical reporting.
+
+**What the viewer shows:**
+- **KPI metrics** — total variants, PASS variants, SNP count, INDEL count, chromosomes covered
+- **Variant type breakdown** — bar chart of SNP / INDEL / OTHER counts
+- **Filter status** — pie chart of PASS vs filtered variants
+- **Quality score distribution** — histogram with median line
+- **Allele frequency distribution** — if AF is present in the INFO field
+- **Variants per chromosome** — bar chart showing genomic distribution
+- **Filterable variant table** — filter by chromosome and variant type, with CHROM, POS, REF, ALT, QUAL, FILTER, TYPE, AF, DP columns
+- **VCF header viewer** — metadata grouped by type (fileformat, reference, contig, INFO fields, FILTER definitions)
+- CSV download of the filtered variant table
+
+No external library required — VCF is parsed as plain tab-delimited text. Handles both `.vcf` and `.vcf.gz`.
 
 ---
 
@@ -136,7 +141,7 @@ pydicom
 nibabel
 ```
 
-FASTQ and FASTA parsing uses Python built-ins only (`gzip`, string processing) — no additional packages needed.
+FASTQ, FASTA, and VCF parsing uses Python built-ins only (`gzip`, string processing) — no additional packages needed for genomics formats.
 
 ### App startup script (`app.sh`)
 
@@ -144,6 +149,10 @@ FASTQ and FASTA parsing uses Python built-ins only (`gzip`, string processing) �
 #!/bin/bash
 streamlit run app.py --server.port=8888 --server.address=0.0.0.0
 ```
+
+### Streamlit theme (`  .streamlit/config.toml`)
+
+The app ships with a `.streamlit/config.toml` file that applies Domino's design system colours — primary purple `#3B3BD3`, layout background `#FAFAFA`, text `#2E2E38`. This file must be included alongside `app.py` in the project.
 
 ### Enabling as a Domino Extension
 
