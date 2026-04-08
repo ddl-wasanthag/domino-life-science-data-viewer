@@ -127,7 +127,9 @@ def list_snapshot_files(snapshot_id: str, token: str,
     Returns list of dicts: {path, name, size_bytes}
     """
     SUPPORTED_EXTS = (".parquet", ".xpt", ".dcm", ".dicom", ".dic", ".ima",
-                      ".nii", ".nii.gz")
+                      ".nii", ".nii.gz",
+                      ".fastq", ".fastq.gz", ".fq", ".fq.gz",
+                      ".fasta", ".fa", ".fna", ".ffn")
     if depth > 4:
         return []
     try:
