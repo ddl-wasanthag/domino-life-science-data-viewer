@@ -15,6 +15,27 @@ import urllib3
 # Suppress SSL warnings for internal Domino communication
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+# ── Matplotlib Domino colour palette ─────────────────────────────────────────
+plt.rcParams.update({
+    "axes.prop_cycle": plt.cycler(color=[
+        "#3B3BD3", "#0070CC", "#28A464", "#CCB718",
+        "#FF6543", "#E835A7", "#2EDCC4",
+    ]),
+    "axes.facecolor":    "#FFFFFF",
+    "figure.facecolor":  "#FAFAFA",
+    "axes.edgecolor":    "#E0E0E0",
+    "axes.labelcolor":   "#2E2E38",
+    "xtick.color":       "#65657B",
+    "ytick.color":       "#65657B",
+    "grid.color":        "#E0E0E0",
+    "grid.alpha":        0.5,
+    "font.size":         12,
+    "axes.titlesize":    13,
+    "axes.titleweight":  "600",
+    "axes.spines.top":   False,
+    "axes.spines.right": False,
+})
+
 # Add DICOM support
 try:
     import pydicom
@@ -665,6 +686,158 @@ st.set_page_config(
     page_icon="🔬",
     layout="wide",
 )
+
+# ── Domino Design System theme ────────────────────────────────────────────────
+# Colors and typography from domino-apps-guidelines
+# Primary: #3B3BD3  Text: #2E2E38  Secondary bg: #FAFAFA  Border: #E0E0E0
+# Font: Inter (Domino's primary typeface)
+st.markdown("""
+<style>
+/* ── Inter font — Domino's primary typeface ─────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+html, body, [class*="css"] {
+    font-family: 'Inter', 'Lato', 'Helvetica Neue', Arial, sans-serif;
+}
+
+/* ── Top navigation bar ─────────────────────────────────────────────── */
+/* Height: 44px, Background: #2E2E38 (neutralDark700) per guidelines    */
+header[data-testid="stHeader"] {
+    background-color: #2E2E38;
+    height: 44px;
+}
+header[data-testid="stHeader"]::before {
+    content: "🔬  Life Sciences Data Viewer";
+    color: #FFFFFF;
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 0 24px;
+    display: flex;
+    align-items: center;
+    height: 44px;
+    line-height: 44px;
+}
+
+/* ── Sidebar ────────────────────────────────────────────────────────── */
+section[data-testid="stSidebar"] {
+    background-color: #FFFFFF;
+    border-right: 1px solid #E0E0E0;
+}
+section[data-testid="stSidebar"] * {
+    font-family: 'Inter', sans-serif;
+}
+
+/* ── Main content area ──────────────────────────────────────────────── */
+.main .block-container {
+    padding-top: 24px;
+    padding-bottom: 40px;
+    max-width: 1200px;
+}
+
+/* ── Typography ─────────────────────────────────────────────────────── */
+h1 { font-size: 24px; font-weight: 600; color: #2E2E38; }
+h2 { font-size: 18px; font-weight: 600; color: #2E2E38; }
+h3 { font-size: 14px; font-weight: 600; color: #2E2E38; }
+p, li { color: #2E2E38; font-size: 14px; }
+
+/* ── Primary button — Domino purple ─────────────────────────────────── */
+button[kind="primary"], .stButton > button[data-baseweb="button"] {
+    background-color: #3B3BD3 !important;
+    border-color: #3B3BD3 !important;
+    color: #FFFFFF !important;
+    font-family: 'Inter', sans-serif !important;
+    font-weight: 500 !important;
+    border-radius: 4px !important;
+    box-shadow: none !important;
+    padding: 6px 16px !important;
+}
+button[kind="primary"]:hover,
+.stButton > button[data-baseweb="button"]:hover {
+    background-color: #3123B1 !important;
+    border-color: #3123B1 !important;
+}
+
+/* ── Secondary buttons (presets, etc.) ──────────────────────────────── */
+.stButton > button:not([data-baseweb="button"]) {
+    background-color: #EDECFB !important;
+    border: 1px solid #C9C5F2 !important;
+    color: #1820A0 !important;
+    font-family: 'Inter', sans-serif !important;
+    font-weight: 500 !important;
+    border-radius: 4px !important;
+    box-shadow: none !important;
+}
+.stButton > button:not([data-baseweb="button"]):hover {
+    background-color: #C9C5F2 !important;
+}
+
+/* ── Metrics ─────────────────────────────────────────────────────────── */
+[data-testid="stMetric"] {
+    background-color: #FFFFFF;
+    border: 1px solid #E0E0E0;
+    border-radius: 8px;
+    padding: 16px;
+}
+[data-testid="stMetricLabel"] { color: #65657B; font-size: 12px; font-weight: 500; }
+[data-testid="stMetricValue"] { color: #2E2E38; font-size: 24px; font-weight: 600; }
+
+/* ── Selectbox & inputs ─────────────────────────────────────────────── */
+[data-baseweb="select"] {
+    border-radius: 4px !important;
+    border-color: #E0E0E0 !important;
+}
+[data-baseweb="input"] {
+    border-radius: 4px !important;
+    border-color: #E0E0E0 !important;
+}
+
+/* ── Tabs ────────────────────────────────────────────────────────────── */
+[data-baseweb="tab-list"] {
+    border-bottom: 2px solid #E0E0E0;
+    gap: 0;
+}
+[data-baseweb="tab"] {
+    font-family: 'Inter', sans-serif !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    color: #65657B !important;
+    padding: 8px 16px !important;
+}
+[aria-selected="true"][data-baseweb="tab"] {
+    color: #3B3BD3 !important;
+    border-bottom: 2px solid #3B3BD3 !important;
+}
+
+/* ── Success/info/warning callouts ─────────────────────────────────── */
+[data-testid="stAlert"] {
+    border-radius: 4px;
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+}
+
+/* ── Dataframe ─────────────────────────────────────────────────────── */
+[data-testid="stDataFrame"] {
+    border: 1px solid #E0E0E0;
+    border-radius: 4px;
+}
+
+/* ── Caption / helper text ──────────────────────────────────────────── */
+[data-testid="stCaptionContainer"] {
+    color: #65657B;
+    font-size: 12px;
+}
+
+/* ── Expanders ──────────────────────────────────────────────────────── */
+[data-testid="stExpander"] {
+    border: 1px solid #E0E0E0;
+    border-radius: 4px;
+}
+
+/* ── Divider ────────────────────────────────────────────────────────── */
+hr { border-color: #E0E0E0; }
+</style>
+""", unsafe_allow_html=True)
 
 if 'filters' not in st.session_state:
     st.session_state.filters = {}

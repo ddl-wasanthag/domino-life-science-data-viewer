@@ -1,0 +1,9 @@
+[theme]
+# Domino Design System colors
+# Source: domino-apps-guidelines/.cursor/rules
+
+primaryColor = "#3B3BD3"
+backgroundColor = "#FAFAFA"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#2E2E38"
+font = "sans serif"
