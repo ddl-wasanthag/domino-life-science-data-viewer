@@ -658,6 +658,12 @@ def display_frequency_table(df: pd.DataFrame, column: str, max_categories: int =
         st.write("Too many unique values to display frequency table")
 
 # Initialize session state
+st.set_page_config(
+    page_title="Life Sciences Data Viewer",
+    page_icon="🔬",
+    layout="wide",
+)
+
 if 'filters' not in st.session_state:
     st.session_state.filters = {}
 if 'sort_column' not in st.session_state:
@@ -713,22 +719,6 @@ with st.sidebar:
     if st.button("🔄 Refresh"):
         st.session_state.datasets = None
         st.rerun()
-
-# ── Debug panel ───────────────────────────────────────────────────────────────
-with st.expander("🔧 Debug: incoming headers & params", expanded=False):
-    incoming = get_viewer_headers()
-    domino_headers = {k: (v[:30] + "…" if len(v) > 30 else v)
-                      for k, v in incoming.items()
-                      if any(k.lower().startswith(p)
-                             for p in ("domino", "authorization", "x-domino"))}
-    if domino_headers:
-        st.json(domino_headers)
-    else:
-        st.warning("No Domino identity headers found. "
-                   "Ensure Extended Identity Propagation is enabled on this app.")
-    st.json({"projectId": project_id, "datasetId": dataset_id,
-             "filePath": file_path_param, "mountPointType": mount_point_type,
-             "token_present": bool(api_token)})
 
 st.title("🔬 Life Sciences Data Viewer")
 
@@ -847,7 +837,8 @@ if project_id:
 
     if not files:
         st.info("No supported files found in this dataset. "
-                "Supported: .parquet, .xpt, .dcm, .dicom, .nii, .nii.gz")
+                "Supported formats: .parquet, .xpt, .dcm, .dicom, .nii, .nii.gz, "
+                ".fastq, .fastq.gz, .fq, .fq.gz, .fasta, .fa, .fna, .ffn")
         st.stop()
 
     file_options = {f["path"]: f for f in files}
