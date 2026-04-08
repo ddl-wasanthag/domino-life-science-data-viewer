@@ -1248,6 +1248,45 @@ with st.sidebar:
 
 st.title("🔬 Life Sciences Data Viewer")
 
+# ── Welcome banner — shown when no file context is active ─────────────────────
+if not (dataset_id and file_path_param) and not project_id:
+    # Standalone mode with no file loaded yet — show onboarding
+    _show_welcome = True
+elif project_id and not st.session_state.get("loaded_file_bytes"):
+    _show_welcome = True
+else:
+    _show_welcome = False
+
+if _show_welcome:
+    st.markdown("""
+<div style="
+    background: #FFFFFF;
+    border: 1px solid #E0E0E0;
+    border-left: 4px solid #3B3BD3;
+    border-radius: 8px;
+    padding: 24px 28px;
+    margin-bottom: 24px;
+">
+<p style="margin:0 0 8px 0; font-size:15px; font-weight:600; color:#2E2E38;">
+    About this Extension
+</p>
+<p style="margin:0 0 16px 0; font-size:14px; color:#65657B; line-height:1.6;">
+    <strong>Life Sciences Data Viewer</strong> lets you explore and visualise life sciences 
+    datasets stored in Domino — directly from any project sidebar. Select a dataset below 
+    to browse its files, then click <strong>Load File</strong> to open it.
+</p>
+<p style="margin:0 0 10px 0; font-size:13px; font-weight:600; color:#2E2E38;">Supported formats</p>
+<div style="display:flex; flex-wrap:wrap; gap:8px;">
+    <span style="background:#EDECFB; color:#1820A0; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:500;">📊 Parquet</span>
+    <span style="background:#EDECFB; color:#1820A0; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:500;">📊 XPT (SAS Transport)</span>
+    <span style="background:#E8F5EE; color:#1A6B3E; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:500;">🩻 DICOM</span>
+    <span style="background:#E8F5EE; color:#1A6B3E; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:500;">🧠 NIfTI</span>
+    <span style="background:#FFF8E1; color:#7B5B00; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:500;">🧬 FASTQ / FASTA</span>
+    <span style="background:#FFF8E1; color:#7B5B00; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:500;">🧬 VCF Variants</span>
+</div>
+</div>
+""", unsafe_allow_html=True)
+
 # ══════════════════════════════════════════════════════════════════════════════
 # DIRECT FILE MODE
 # Launched from datasetFileContext mount point with a specific file.
@@ -1362,9 +1401,29 @@ if project_id:
         files = list_snapshot_files(snapshot_id, api_token)
 
     if not files:
-        st.info("No supported files found in this dataset. "
-                "Supported formats: .parquet, .xpt, .dcm, .dicom, .nii, .nii.gz, "
-                ".fastq, .fastq.gz, .fq, .fq.gz, .fasta, .fa, .fna, .ffn, .vcf, .vcf.gz")
+        st.markdown("""
+<div style="
+    background:#FAFAFA; border:1px solid #E0E0E0; border-radius:8px;
+    padding:24px 28px; text-align:center;
+">
+<p style="font-size:32px; margin:0 0 8px 0;">📂</p>
+<p style="font-size:15px; font-weight:600; color:#2E2E38; margin:0 0 8px 0;">
+    No supported files in this dataset
+</p>
+<p style="font-size:13px; color:#65657B; margin:0 0 16px 0;">
+    Add files to this dataset to view them here. Supported formats:
+</p>
+<div style="display:flex; flex-wrap:wrap; gap:6px; justify-content:center;">
+    <span style="background:#EDECFB;color:#1820A0;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:500;">Parquet</span>
+    <span style="background:#EDECFB;color:#1820A0;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:500;">XPT</span>
+    <span style="background:#E8F5EE;color:#1A6B3E;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:500;">DICOM</span>
+    <span style="background:#E8F5EE;color:#1A6B3E;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:500;">NIfTI</span>
+    <span style="background:#FFF8E1;color:#7B5B00;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:500;">FASTQ</span>
+    <span style="background:#FFF8E1;color:#7B5B00;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:500;">FASTA</span>
+    <span style="background:#FFF8E1;color:#7B5B00;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:500;">VCF</span>
+</div>
+</div>
+""", unsafe_allow_html=True)
         st.stop()
 
     file_options = {f["path"]: f for f in files}
