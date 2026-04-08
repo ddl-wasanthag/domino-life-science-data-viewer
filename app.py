@@ -982,28 +982,48 @@ if not project_id:
     st.write(f"Browsing: `{target_path}`")
     data_files = get_data_files(target_path)
     if not data_files:
-        st.info("No .parquet, .xpt, or DICOM files found here.")
+        st.info("No supported files found here. "
+                "Supported: .parquet, .xpt, .dcm, .dicom, .nii, .nii.gz, "
+                ".fastq, .fastq.gz, .fq, .fq.gz, .fasta, .fa, .fna, .ffn")
         st.stop()
-    data_files_only = [(rel, full) for rel, full, ftype in data_files if ftype == 'data']
+    data_files_only  = [(rel, full) for rel, full, ftype in data_files if ftype == 'data']
     dicom_files_only = [(rel, full) for rel, full, ftype in data_files if ftype == 'dicom']
-    file_type = st.radio("File Type", ["Data Files (Parquet/XPT)", "DICOM Images"], horizontal=True)
-    if file_type == "Data Files (Parquet/XPT)":
-        if not data_files_only:
-            st.info("No data files found in this directory.")
-            st.stop()
+    nifti_files_only = [(rel, full) for rel, full, ftype in data_files if ftype == 'nifti']
+    fastq_files_only = [(rel, full) for rel, full, ftype in data_files if ftype == 'fastq']
+    fasta_files_only = [(rel, full) for rel, full, ftype in data_files if ftype == 'fasta']
+
+    # Build file type options based on what's actually present
+    type_options = []
+    if data_files_only:  type_options.append("📊 Data Files (Parquet/XPT)")
+    if dicom_files_only: type_options.append("🩻 DICOM Images")
+    if nifti_files_only: type_options.append("🧠 NIfTI Images")
+    if fastq_files_only: type_options.append("🧬 FASTQ")
+    if fasta_files_only: type_options.append("🧬 FASTA")
+
+    file_type = st.radio("File Type", type_options, horizontal=True)
+
+    if file_type == "📊 Data Files (Parquet/XPT)":
         file_map = {rel: full for rel, full in data_files_only}
         selected_file = st.selectbox("Select a data file", list(file_map.keys()))
 
-    # Load the data
+    elif file_type in ("🧬 FASTQ", "🧬 FASTA"):
+        seq_files = fastq_files_only if file_type == "🧬 FASTQ" else fasta_files_only
+        seq_map = {rel: full for rel, full in seq_files}
+        selected_seq = st.selectbox("Select file", list(seq_map.keys()))
+        with open(seq_map[selected_seq], "rb") as f:
+            render_sequence_viewer(f.read(), selected_seq)
+        st.stop()
+
+    # Load the data (Data Files path only from here)
     file_path = file_map[selected_file]
     try:
         if selected_file.lower().endswith('.parquet'):
             original_df = pd.read_parquet(file_path)
         else:
             original_df, _ = pyreadstat.read_xport(file_path)
-        
+
         st.success(f"Successfully loaded **{selected_file}** ({original_df.shape[0]} rows × {original_df.shape[1]} columns)")
-        
+
     except Exception as e:
         st.error(f"Failed to load `{selected_file}`: {e}")
         st.stop()
@@ -1320,7 +1340,7 @@ else:  # DICOM Images
         st.stop()
     
     if not dicom_files_only:
-        st.info("No DICOM files found in this directory.")
+        st.info("No DICOM files found in this directory. Try selecting a different folder.")
         st.stop()
     
     dicom_file_map = {rel: full for rel, full in dicom_files_only}
