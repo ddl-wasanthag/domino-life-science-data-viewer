@@ -150,7 +150,8 @@ def list_snapshot_files(snapshot_id: str, token: str,
     SUPPORTED_EXTS = (".parquet", ".xpt", ".dcm", ".dicom", ".dic", ".ima",
                       ".nii", ".nii.gz",
                       ".fastq", ".fastq.gz", ".fq", ".fq.gz",
-                      ".fasta", ".fa", ".fna", ".ffn")
+                      ".fasta", ".fa", ".fna", ".ffn",
+                      ".vcf", ".vcf.gz")
     if depth > 4:
         return []
     try:
@@ -209,7 +210,10 @@ def get_dataset_files(base_path: str) -> List[Dict]:
     Used only when no project context is available.
     """
     SUPPORTED_EXTS = (".parquet", ".xpt", ".dcm", ".dicom", ".dic", ".ima",
-                      ".nii", ".nii.gz")
+                      ".nii", ".nii.gz",
+                      ".fastq", ".fastq.gz", ".fq", ".fq.gz",
+                      ".fasta", ".fa", ".fna", ".ffn",
+                      ".vcf", ".vcf.gz")
     files = []
     if not os.path.isdir(base_path):
         return files
@@ -285,6 +289,236 @@ def parse_fasta(content: str, max_seqs: int = 50000):
             "_full_seq": seq,  # kept for GC sliding window, excluded from display
         })
     return records
+
+
+def parse_vcf(content: str, max_variants: int = 100000):
+    """
+    Parse VCF (Variant Call Format) — plain text, tab-delimited after headers.
+    Header lines start with ##, column header starts with #CHROM.
+    Returns (list of variant dicts, list of metadata strings)
+    """
+    import gzip
+    metadata = []
+    variants = []
+    columns  = []
+
+    for line in content.splitlines():
+        if line.startswith("##"):
+            metadata.append(line[2:])
+            continue
+        if line.startswith("#CHROM"):
+            columns = line[1:].split("	")
+            continue
+        if not line.strip() or not columns:
+            continue
+        parts = line.split("	")
+        row = dict(zip(columns, parts))
+        if len(variants) >= max_variants:
+            break
+
+        # Parse INFO field into a dict for key metrics
+        info_raw = row.get("INFO", ".")
+        info = {}
+        if info_raw != ".":
+            for item in info_raw.split(";"):
+                if "=" in item:
+                    k, v = item.split("=", 1)
+                    info[k] = v
+                else:
+                    info[item] = True
+
+        # Determine variant type
+        ref = row.get("REF", "")
+        alt = row.get("ALT", "")
+        alts = [a for a in alt.split(",") if a != "."]
+        if all(len(a) == 1 == len(ref) for a in alts):
+            vtype = "SNP"
+        elif any(len(a) != len(ref) for a in alts):
+            vtype = "INDEL"
+        else:
+            vtype = "OTHER"
+
+        variants.append({
+            "CHROM":  row.get("CHROM", ""),
+            "POS":    int(row.get("POS", 0)),
+            "ID":     row.get("ID", "."),
+            "REF":    ref,
+            "ALT":    alt,
+            "QUAL":   row.get("QUAL", "."),
+            "FILTER": row.get("FILTER", "."),
+            "TYPE":   vtype,
+            "AF":     info.get("AF", info.get("MAF", None)),
+            "DP":     info.get("DP", None),
+        })
+
+    return variants, metadata
+
+
+def render_vcf_viewer(file_bytes: bytes, fname: str):
+    """
+    Render a VCF file from raw bytes.
+    Shows: variant summary, type breakdown, quality distribution,
+    allele frequency distribution, filterable variant table.
+    No external library — pure Python parsing.
+    """
+    import gzip
+
+    is_gz = fname.lower().endswith(".gz")
+    try:
+        raw = (gzip.decompress(file_bytes) if is_gz else file_bytes
+               ).decode("utf-8", errors="replace")
+    except Exception as e:
+        st.error(f"Could not decode VCF: {e}")
+        return
+
+    MAX_VARIANTS = 100000
+    with st.spinner("Parsing VCF…"):
+        variants, metadata = parse_vcf(raw, MAX_VARIANTS)
+
+    if not variants:
+        st.warning("No variant records found. Check the file format.")
+        return
+
+    df = pd.DataFrame(variants)
+    truncated = len(variants) == MAX_VARIANTS
+
+    # Convert numeric columns
+    df["POS"]  = pd.to_numeric(df["POS"],  errors="coerce")
+    df["QUAL"] = pd.to_numeric(df["QUAL"], errors="coerce")
+    df["AF"]   = pd.to_numeric(df["AF"],   errors="coerce")
+    df["DP"]   = pd.to_numeric(df["DP"],   errors="coerce")
+
+    pass_count = (df["FILTER"] == "PASS").sum()
+    snp_count  = (df["TYPE"] == "SNP").sum()
+    indel_count= (df["TYPE"] == "INDEL").sum()
+    chroms     = df["CHROM"].nunique()
+
+    # ── KPIs ─────────────────────────────────────────────────────────────────
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Total variants", f"{len(df):,}" + (" (trunc.)" if truncated else ""))
+    c2.metric("PASS variants",  f"{pass_count:,}")
+    c3.metric("SNPs",           f"{snp_count:,}")
+    c4.metric("INDELs",         f"{indel_count:,}")
+    c5.metric("Chromosomes",    f"{chroms}")
+
+    tabs = st.tabs(["📊 Summary", "🧬 Variants", "ℹ️ Header"])
+
+    with tabs[0]:
+        col1, col2 = st.columns(2)
+
+        with col1:
+            # Variant type breakdown
+            type_counts = df["TYPE"].value_counts()
+            fig, ax = plt.subplots(figsize=(5, 4))
+            colors = ["#3B3BD3", "#28A464", "#CCB718"]
+            bars = ax.bar(type_counts.index, type_counts.values,
+                          color=colors[:len(type_counts)], edgecolor="none", width=0.5)
+            for bar, val in zip(bars, type_counts.values):
+                ax.text(bar.get_x() + bar.get_width()/2,
+                        bar.get_height() + max(type_counts.values)*0.01,
+                        f"{val:,}", ha="center", va="bottom",
+                        fontsize=10, fontweight="600", color="#2E2E38")
+            ax.set_title("Variant types")
+            ax.set_ylabel("Count")
+            plt.tight_layout()
+            st.pyplot(fig); plt.close()
+
+        with col2:
+            # FILTER status pie
+            filter_counts = df["FILTER"].value_counts().head(5)
+            fig, ax = plt.subplots(figsize=(5, 4))
+            pie_colors = ["#28A464", "#C20A29", "#CCB718", "#0070CC", "#8F8FA3"]
+            ax.pie(filter_counts.values,
+                   labels=filter_counts.index,
+                   colors=pie_colors[:len(filter_counts)],
+                   startangle=90,
+                   wedgeprops={"edgecolor": "white", "linewidth": 2},
+                   textprops={"fontsize": 11, "color": "#2E2E38"})
+            ax.set_title("Filter status")
+            plt.tight_layout()
+            st.pyplot(fig); plt.close()
+
+        # Quality score distribution
+        qual_data = df["QUAL"].dropna()
+        if len(qual_data) > 0:
+            st.subheader("Quality score distribution")
+            fig, ax = plt.subplots(figsize=(12, 3))
+            ax.hist(qual_data, bins=50, edgecolor="none",
+                    alpha=0.85, color="#3B3BD3")
+            ax.axvline(qual_data.median(), color="#C20A29", linestyle="--",
+                       linewidth=1.5, label=f"Median Q{qual_data.median():.0f}")
+            ax.set_xlabel("QUAL score"); ax.set_ylabel("Count")
+            ax.set_title("Variant quality scores")
+            ax.legend()
+            plt.tight_layout()
+            st.pyplot(fig); plt.close()
+
+        # Allele frequency distribution
+        af_data = df["AF"].dropna()
+        if len(af_data) > 0:
+            st.subheader("Allele frequency distribution")
+            fig, ax = plt.subplots(figsize=(12, 3))
+            ax.hist(af_data.astype(float), bins=50, edgecolor="none",
+                    alpha=0.85, color="#28A464")
+            ax.set_xlabel("Allele frequency (AF)"); ax.set_ylabel("Count")
+            ax.set_title("Variant allele frequencies")
+            ax.set_xlim(0, 1)
+            plt.tight_layout()
+            st.pyplot(fig); plt.close()
+
+        # Variants per chromosome
+        st.subheader("Variants per chromosome")
+        chrom_counts = df["CHROM"].value_counts().sort_index()
+        fig, ax = plt.subplots(figsize=(12, 3))
+        ax.bar(range(len(chrom_counts)), chrom_counts.values,
+               color="#0070CC", edgecolor="none", alpha=0.85)
+        ax.set_xticks(range(len(chrom_counts)))
+        ax.set_xticklabels(chrom_counts.index, rotation=45, ha="right", fontsize=9)
+        ax.set_ylabel("Variant count")
+        ax.set_title("Variant distribution across chromosomes")
+        plt.tight_layout()
+        st.pyplot(fig); plt.close()
+
+    with tabs[1]:
+        # Filterable variant table
+        st.subheader(f"Variants ({len(df):,} total)")
+        filter_col1, filter_col2 = st.columns(2)
+        with filter_col1:
+            chrom_filter = st.multiselect(
+                "Filter by chromosome",
+                options=sorted(df["CHROM"].unique()),
+                default=[])
+        with filter_col2:
+            type_filter = st.multiselect(
+                "Filter by type",
+                options=df["TYPE"].unique().tolist(),
+                default=[])
+
+        display = df.copy()
+        if chrom_filter:
+            display = display[display["CHROM"].isin(chrom_filter)]
+        if type_filter:
+            display = display[display["TYPE"].isin(type_filter)]
+
+        st.caption(f"Showing {len(display):,} of {len(df):,} variants")
+        st.dataframe(display, use_container_width=True, height=500)
+        st.download_button(
+            "Download filtered VCF table (CSV)",
+            display.to_csv(index=False).encode(),
+            f"{os.path.basename(fname)}_variants.csv", "text/csv")
+
+    with tabs[2]:
+        st.subheader("VCF header metadata")
+        if metadata:
+            # Show key metadata groups
+            for prefix in ["fileformat", "reference", "contig", "INFO", "FILTER", "FORMAT"]:
+                group = [m for m in metadata if m.startswith(prefix)]
+                if group:
+                    with st.expander(f"{prefix} ({len(group)})"):
+                        for m in group[:20]:
+                            st.text(m)
+        else:
+            st.info("No header metadata found.")
 
 
 def render_sequence_viewer(file_bytes: bytes, fname: str):
@@ -585,6 +819,7 @@ def get_data_files(root_dir):
     dicom_extensions = {'.dcm', '.dicom', '.dic', '.ima'}
     fastq_extensions = {'.fastq', '.fastq.gz', '.fq', '.fq.gz'}
     fasta_extensions = {'.fasta', '.fa', '.fna', '.ffn'}
+    vcf_extensions   = {'.vcf', '.vcf.gz'}
 
     for dirpath, _, filenames in os.walk(root_dir):
         for fn in filenames:
@@ -602,6 +837,8 @@ def get_data_files(root_dir):
                 files.append((rel, full, 'fastq'))
             elif any(lower.endswith(ext) for ext in fasta_extensions):
                 files.append((rel, full, 'fasta'))
+            elif any(lower.endswith(ext) for ext in vcf_extensions):
+                files.append((rel, full, 'vcf'))
             elif '.' not in fn and DICOM_AVAILABLE:
                 try:
                     pydicom.dcmread(full, stop_before_pixels=True)
@@ -1127,7 +1364,7 @@ if project_id:
     if not files:
         st.info("No supported files found in this dataset. "
                 "Supported formats: .parquet, .xpt, .dcm, .dicom, .nii, .nii.gz, "
-                ".fastq, .fastq.gz, .fq, .fq.gz, .fasta, .fa, .fna, .ffn")
+                ".fastq, .fastq.gz, .fq, .fq.gz, .fasta, .fa, .fna, .ffn, .vcf, .vcf.gz")
         st.stop()
 
     file_options = {f["path"]: f for f in files}
@@ -1250,6 +1487,9 @@ if project_id:
               ".fasta", ".fa", ".fna", ".ffn"]):
         render_sequence_viewer(file_bytes, selected_file_path)
 
+    elif fname.endswith(".vcf") or fname.endswith(".vcf.gz"):
+        render_vcf_viewer(file_bytes, selected_file_path)
+
     st.stop()  # Don't fall through to filesystem mode when in API mode
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1280,6 +1520,7 @@ if not project_id:
     nifti_files_only = [(rel, full) for rel, full, ftype in data_files if ftype == 'nifti']
     fastq_files_only = [(rel, full) for rel, full, ftype in data_files if ftype == 'fastq']
     fasta_files_only = [(rel, full) for rel, full, ftype in data_files if ftype == 'fasta']
+    vcf_files_only   = [(rel, full) for rel, full, ftype in data_files if ftype == 'vcf']
 
     # Build file type options based on what's actually present
     type_options = []
@@ -1288,6 +1529,7 @@ if not project_id:
     if nifti_files_only: type_options.append("🧠 NIfTI Images")
     if fastq_files_only: type_options.append("🧬 FASTQ")
     if fasta_files_only: type_options.append("🧬 FASTA")
+    if vcf_files_only:   type_options.append("🧬 VCF Variants")
 
     file_type = st.radio("File Type", type_options, horizontal=True)
 
@@ -1301,6 +1543,13 @@ if not project_id:
         selected_seq = st.selectbox("Select file", list(seq_map.keys()))
         with open(seq_map[selected_seq], "rb") as f:
             render_sequence_viewer(f.read(), selected_seq)
+        st.stop()
+
+    elif file_type == "🧬 VCF Variants":
+        vcf_map = {rel: full for rel, full in vcf_files_only}
+        selected_vcf = st.selectbox("Select VCF file", list(vcf_map.keys()))
+        with open(vcf_map[selected_vcf], "rb") as f:
+            render_vcf_viewer(f.read(), selected_vcf)
         st.stop()
 
     # Load the data (Data Files path only from here)
