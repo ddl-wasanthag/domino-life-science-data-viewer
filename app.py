@@ -199,6 +199,132 @@ def get_dataset_files(base_path: str) -> List[Dict]:
                                "name": fn, "size": os.path.getsize(full)})
     return files
 
+def parse_fastq(content: str, max_reads: int = 50000):
+    """Parse FASTQ: 4 lines per record (@header / seq / + / qual)."""
+    records = []
+    lines = content.splitlines()
+    i = 0
+    while i + 3 < len(lines) and len(records) < max_reads:
+        header = lines[i].lstrip("@").strip()
+        seq    = lines[i+1].strip()
+        qual   = lines[i+3].strip()
+        if seq and qual and len(seq) == len(qual):
+            gc = sum(1 for c in seq if c in "GCgc")
+            records.append({
+                "id":      header.split()[0],
+                "length":  len(seq),
+                "gc_pct":  round(gc / len(seq) * 100, 1),
+                "quality": round(sum(ord(c)-33 for c in qual) / len(qual), 1),
+                "sequence_preview": seq[:60] + ("…" if len(seq) > 60 else ""),
+            })
+        i += 4
+    return records
+
+
+def parse_fasta(content: str, max_seqs: int = 50000):
+    """Parse FASTA: >header lines followed by sequence lines."""
+    records = []
+    current_id, current_seq = None, []
+    for line in content.splitlines():
+        line = line.strip()
+        if line.startswith(">"):
+            if current_id and len(records) < max_seqs:
+                seq = "".join(current_seq)
+                gc = sum(1 for c in seq if c in "GCgc")
+                records.append({
+                    "id":      current_id.split()[0],
+                    "length":  len(seq),
+                    "gc_pct":  round(gc / len(seq) * 100, 1) if seq else 0,
+                    "sequence_preview": seq[:60] + ("…" if len(seq) > 60 else ""),
+                })
+            current_id, current_seq = line[1:], []
+        elif current_id:
+            current_seq.append(line)
+    if current_id and len(records) < max_seqs:
+        seq = "".join(current_seq)
+        gc = sum(1 for c in seq if c in "GCgc")
+        records.append({
+            "id":      current_id.split()[0],
+            "length":  len(seq),
+            "gc_pct":  round(gc / len(seq) * 100, 1) if seq else 0,
+            "sequence_preview": seq[:60] + ("…" if len(seq) > 60 else ""),
+        })
+    return records
+
+
+def render_sequence_viewer(file_bytes: bytes, fname: str):
+    """
+    Render FASTQ or FASTA from raw bytes — no external library needed.
+    Shows: read count, length distribution, GC%, quality scores (FASTQ only).
+    """
+    import gzip
+
+    is_gz = fname.lower().endswith(".gz")
+    try:
+        raw = (gzip.decompress(file_bytes) if is_gz else file_bytes
+               ).decode("utf-8", errors="replace")
+    except Exception as e:
+        st.error(f"Could not decode file: {e}")
+        return
+
+    is_fastq = any(fname.lower().endswith(ext)
+                   for ext in [".fastq", ".fastq.gz", ".fq", ".fq.gz"])
+
+    with st.spinner("Parsing sequences…"):
+        records = parse_fastq(raw) if is_fastq else parse_fasta(raw)
+
+    if not records:
+        st.warning("No sequence records found. Check the file format.")
+        return
+
+    df = pd.DataFrame(records)
+    fmt = "FASTQ" if is_fastq else "FASTA"
+
+    # KPIs
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric(f"{fmt} reads", f"{len(df):,}")
+    c2.metric("Median length", f"{int(df['length'].median()):,} bp")
+    c3.metric("Mean GC%", f"{df['gc_pct'].mean():.1f}%")
+    if is_fastq:
+        c4.metric("Mean quality", f"Q{df['quality'].mean():.1f}")
+    else:
+        c4.metric("Total bases", f"{df['length'].sum():,}")
+
+    tabs = st.tabs(["📊 Distributions", "🔬 Records"] +
+                   (["📈 Quality"] if is_fastq else []))
+
+    with tabs[0]:
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 3))
+        ax1.hist(df["length"], bins=50, edgecolor="black", alpha=0.7, color="#543FDE")
+        ax1.set_xlabel("Read length (bp)"); ax1.set_ylabel("Count")
+        ax1.set_title("Length distribution")
+        ax2.hist(df["gc_pct"], bins=50, edgecolor="black", alpha=0.7, color="#28A464")
+        ax2.axvline(df["gc_pct"].mean(), color="red", linestyle="--",
+                    label=f"Mean {df['gc_pct'].mean():.1f}%")
+        ax2.set_xlabel("GC%"); ax2.set_ylabel("Count")
+        ax2.set_title("GC content"); ax2.legend()
+        plt.tight_layout()
+        st.pyplot(fig); plt.close()
+
+    with tabs[1]:
+        st.dataframe(df.head(1000), use_container_width=True, height=500)
+        st.download_button("Download summary CSV",
+                           df.to_csv(index=False).encode(),
+                           f"{os.path.basename(fname)}_summary.csv", "text/csv")
+
+    if is_fastq and len(tabs) > 2:
+        with tabs[2]:
+            fig, ax = plt.subplots(figsize=(10, 3))
+            ax.hist(df["quality"], bins=40, edgecolor="black", alpha=0.7, color="#0070CC")
+            ax.axvline(20, color="orange", linestyle="--", label="Q20 (99% accuracy)")
+            ax.axvline(30, color="red",    linestyle="--", label="Q30 (99.9% accuracy)")
+            ax.set_xlabel("Mean Phred quality score"); ax.set_ylabel("Count")
+            ax.set_title("Quality score distribution"); ax.legend()
+            plt.tight_layout()
+            st.pyplot(fig); plt.close()
+            st.caption("Q20 = 1 error per 100 bases · Q30 = 1 error per 1,000 bases")
+
+
 def render_dicom_viewer_inline(file_bytes: bytes):
     """
     Render a DICOM image from raw bytes.
@@ -318,33 +444,37 @@ def get_all_subdirectories(base_path):
 
 def get_data_files(root_dir):
     """
-    Walk root_dir and return list of (relative_path, full_path)
-    for .parquet, .xpt, and DICOM files.
+    Walk root_dir and return list of (relative_path, full_path, file_type)
+    for supported life sciences file formats.
     """
     files = []
     dicom_extensions = {'.dcm', '.dicom', '.dic', '.ima'}
-    
+    fastq_extensions = {'.fastq', '.fastq.gz', '.fq', '.fq.gz'}
+    fasta_extensions = {'.fasta', '.fa', '.fna', '.ffn'}
+
     for dirpath, _, filenames in os.walk(root_dir):
         for fn in filenames:
             lower = fn.lower()
             full = os.path.join(dirpath, fn)
             rel = os.path.relpath(full, root_dir)
-            
-            # Check for standard data files
+
             if lower.endswith('.parquet') or lower.endswith('.xpt'):
                 files.append((rel, full, 'data'))
-            # Check for DICOM files by extension
             elif any(lower.endswith(ext) for ext in dicom_extensions):
                 files.append((rel, full, 'dicom'))
-            # Check for extensionless files that might be DICOM
+            elif lower.endswith('.nii.gz') or lower.endswith('.nii'):
+                files.append((rel, full, 'nifti'))
+            elif any(lower.endswith(ext) for ext in fastq_extensions):
+                files.append((rel, full, 'fastq'))
+            elif any(lower.endswith(ext) for ext in fasta_extensions):
+                files.append((rel, full, 'fasta'))
             elif '.' not in fn and DICOM_AVAILABLE:
                 try:
-                    # Quick check if it's a DICOM file
                     pydicom.dcmread(full, stop_before_pixels=True)
                     files.append((rel, full, 'dicom'))
                 except:
-                    pass  # Not a DICOM file
-    
+                    pass
+
     return files
 
 def is_dicom_file(file_path):
@@ -834,6 +964,11 @@ if project_id:
                 os.unlink(tmp_path)
         else:
             st.error("nibabel not installed in this environment.")
+
+    elif any(fname.endswith(ext) for ext in
+             [".fastq", ".fastq.gz", ".fq", ".fq.gz",
+              ".fasta", ".fa", ".fna", ".ffn"]):
+        render_sequence_viewer(file_bytes, selected_file_path)
 
     st.stop()  # Don't fall through to filesystem mode when in API mode
 
