@@ -260,6 +260,17 @@ def parse_fasta(content: str, max_seqs: int = 50000):
                     "gc_pct":  round(gc / len(seq) * 100, 1) if seq else 0,
                     "sequence_preview": seq[:60] + ("…" if len(seq) > 60 else ""),
                 })
+            # Store previous record before starting new one
+            if current_id and len(records) < max_seqs:
+                seq = "".join(current_seq)
+                gc = sum(1 for c in seq if c in "GCgc")
+                records.append({
+                    "id":      current_id.split()[0],
+                    "length":  len(seq),
+                    "gc_pct":  round(gc / len(seq) * 100, 1) if seq else 0,
+                    "sequence_preview": seq[:60] + ("…" if len(seq) > 60 else ""),
+                    "_full_seq": seq,
+                })
             current_id, current_seq = line[1:], []
         elif current_id:
             current_seq.append(line)
@@ -271,6 +282,7 @@ def parse_fasta(content: str, max_seqs: int = 50000):
             "length":  len(seq),
             "gc_pct":  round(gc / len(seq) * 100, 1) if seq else 0,
             "sequence_preview": seq[:60] + ("…" if len(seq) > 60 else ""),
+            "_full_seq": seq,  # kept for GC sliding window, excluded from display
         })
     return records
 
@@ -300,7 +312,7 @@ def render_sequence_viewer(file_bytes: bytes, fname: str):
         st.warning("No sequence records found. Check the file format.")
         return
 
-    df = pd.DataFrame(records)
+    df = pd.DataFrame(records).drop(columns=["_full_seq"], errors="ignore")
     fmt = "FASTQ" if is_fastq else "FASTA"
 
     # KPIs
@@ -313,34 +325,133 @@ def render_sequence_viewer(file_bytes: bytes, fname: str):
     else:
         c4.metric("Total bases", f"{df['length'].sum():,}")
 
-    tabs = st.tabs(["📊 Distributions", "🔬 Records"] +
-                   (["📈 Quality"] if is_fastq else []))
+    # For a single genome FASTA, compute GC sliding window from raw sequence
+    # For multi-sequence FASTA/FASTQ, use per-record GC distribution
+    is_single_genome = (not is_fastq and len(records) == 1)
 
-    with tabs[0]:
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 3))
-        ax1.hist(df["length"], bins=50, edgecolor="black", alpha=0.7, color="#543FDE")
-        ax1.set_xlabel("Read length (bp)"); ax1.set_ylabel("Count")
-        ax1.set_title("Length distribution")
-        ax2.hist(df["gc_pct"], bins=50, edgecolor="black", alpha=0.7, color="#28A464")
-        ax2.axvline(df["gc_pct"].mean(), color="red", linestyle="--",
-                    label=f"Mean {df['gc_pct'].mean():.1f}%")
-        ax2.set_xlabel("GC%"); ax2.set_ylabel("Count")
-        ax2.set_title("GC content"); ax2.legend()
-        plt.tight_layout()
-        st.pyplot(fig); plt.close()
+    tab_names = ["📊 Composition"]
+    if is_single_genome:
+        tab_names.append("🧬 GC Landscape")
+    else:
+        tab_names.append("📊 Distributions")
+    tab_names.append("🔬 Records")
+    if is_fastq:
+        tab_names.append("📈 Quality")
 
-    with tabs[1]:
+    tabs = st.tabs(tab_names)
+    tab_idx = 0
+
+    with tabs[tab_idx]:
+        tab_idx += 1
+        if is_single_genome:
+            # Single genome — show nucleotide composition bar chart
+            seq = records[0].get("_full_seq", "")
+            total = len(seq) if seq else 1
+            nuc_counts = {
+                "A": seq.count("A") + seq.count("a"),
+                "T": seq.count("T") + seq.count("t"),
+                "G": seq.count("G") + seq.count("g"),
+                "C": seq.count("C") + seq.count("c"),
+            }
+            nuc_pcts = {k: round(v / total * 100, 2) for k, v in nuc_counts.items()}
+
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+
+            # Nucleotide composition
+            colors = ["#3B3BD3", "#0070CC", "#28A464", "#CCB718"]
+            bars = ax1.bar(nuc_pcts.keys(), nuc_pcts.values(),
+                           color=colors, edgecolor="none", width=0.5)
+            ax1.set_ylabel("Percentage (%)")
+            ax1.set_title("Nucleotide composition")
+            ax1.set_ylim(0, max(nuc_pcts.values()) * 1.2)
+            for bar, (nuc, pct) in zip(bars, nuc_pcts.items()):
+                ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.3,
+                         f"{pct:.1f}%", ha="center", va="bottom",
+                         fontsize=11, fontweight="600", color="#2E2E38")
+
+            # AT vs GC pie
+            at_pct = nuc_pcts["A"] + nuc_pcts["T"]
+            gc_pct = nuc_pcts["G"] + nuc_pcts["C"]
+            ax2.pie([at_pct, gc_pct],
+                    labels=[f"AT  {at_pct:.1f}%", f"GC  {gc_pct:.1f}%"],
+                    colors=["#3B3BD3", "#28A464"],
+                    startangle=90, wedgeprops={"edgecolor": "white", "linewidth": 2},
+                    textprops={"fontsize": 12, "color": "#2E2E38"})
+            ax2.set_title("AT / GC content")
+
+            plt.tight_layout()
+            st.pyplot(fig); plt.close()
+        else:
+            # Multi-sequence — show GC distribution histogram
+            fig, ax = plt.subplots(figsize=(10, 3))
+            ax.hist(df["gc_pct"], bins=50, edgecolor="none", alpha=0.85, color="#28A464")
+            ax.axvline(df["gc_pct"].mean(), color="#C20A29", linestyle="--", linewidth=1.5,
+                       label=f"Mean {df['gc_pct'].mean():.1f}%")
+            ax.set_xlabel("GC%"); ax.set_ylabel("Count")
+            ax.set_title("GC content distribution"); ax.legend()
+            plt.tight_layout()
+            st.pyplot(fig); plt.close()
+
+    with tabs[tab_idx]:
+        tab_idx += 1
+        if is_single_genome:
+            # GC sliding window across the genome
+            seq = records[0].get("_full_seq", "")
+            if seq:
+                window = st.slider("Window size (bp)", 100, 2000, 500, 100)
+                step = window // 2
+
+                positions, gc_values = [], []
+                for i in range(0, len(seq) - window, step):
+                    chunk = seq[i:i + window]
+                    gc = sum(1 for c in chunk if c in "GCgc")
+                    positions.append((i + window // 2) / 1000)  # kb
+                    gc_values.append(gc / window * 100)
+
+                mean_gc = sum(gc_values) / len(gc_values) if gc_values else 0
+
+                fig, ax = plt.subplots(figsize=(14, 4))
+                ax.fill_between(positions, gc_values, alpha=0.2, color="#28A464")
+                ax.plot(positions, gc_values, color="#28A464", linewidth=1.2,
+                        label=f"GC% ({window}bp window)")
+                ax.axhline(mean_gc, color="#C20A29", linestyle="--", linewidth=1.2,
+                           label=f"Mean {mean_gc:.1f}%")
+                ax.set_xlabel("Genomic position (kb)")
+                ax.set_ylabel("GC%")
+                ax.set_title(f"GC content across genome  —  {len(seq)/1000:.1f} kb total")
+                ax.legend(loc="upper right")
+                ax.set_ylim(max(0, mean_gc - 20), min(100, mean_gc + 20))
+                plt.tight_layout()
+                st.pyplot(fig); plt.close()
+                st.caption(
+                    "GC-rich regions often correspond to coding sequences and regulatory elements. "
+                    "GC-poor regions may indicate intergenic or repetitive sequence.")
+            else:
+                st.info("Full sequence not available for sliding window analysis.")
+        else:
+            # Multi-sequence — length distribution
+            fig, ax = plt.subplots(figsize=(10, 3))
+            ax.hist(df["length"], bins=50, edgecolor="none", alpha=0.85, color="#3B3BD3")
+            ax.set_xlabel("Sequence length (bp)"); ax.set_ylabel("Count")
+            ax.set_title("Length distribution")
+            plt.tight_layout()
+            st.pyplot(fig); plt.close()
+
+    with tabs[tab_idx]:
+        tab_idx += 1
         st.dataframe(df.head(1000), use_container_width=True, height=500)
         st.download_button("Download summary CSV",
                            df.to_csv(index=False).encode(),
                            f"{os.path.basename(fname)}_summary.csv", "text/csv")
 
-    if is_fastq and len(tabs) > 2:
-        with tabs[2]:
+    if is_fastq and tab_idx < len(tabs):
+        with tabs[tab_idx]:
             fig, ax = plt.subplots(figsize=(10, 3))
-            ax.hist(df["quality"], bins=40, edgecolor="black", alpha=0.7, color="#0070CC")
-            ax.axvline(20, color="orange", linestyle="--", label="Q20 (99% accuracy)")
-            ax.axvline(30, color="red",    linestyle="--", label="Q30 (99.9% accuracy)")
+            ax.hist(df["quality"], bins=40, edgecolor="none", alpha=0.85, color="#0070CC")
+            ax.axvline(20, color="#CCB718", linestyle="--", linewidth=1.5,
+                       label="Q20 (99% accuracy)")
+            ax.axvline(30, color="#C20A29", linestyle="--", linewidth=1.5,
+                       label="Q30 (99.9% accuracy)")
             ax.set_xlabel("Mean Phred quality score"); ax.set_ylabel("Count")
             ax.set_title("Quality score distribution"); ax.legend()
             plt.tight_layout()
