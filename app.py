@@ -947,6 +947,9 @@ button[kind="primary"]:hover,
 
 /* ── Divider ────────────────────────────────────────────────────────── */
 hr { border-color: #E0E0E0; }
+
+/* ── Hide sidebar collapse button (prevents accidental hide during demo) */
+button[data-testid="collapsedControl"] { display: none !important; }
 </style>
 """, unsafe_allow_html=True)
 
