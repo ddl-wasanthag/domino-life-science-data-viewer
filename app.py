@@ -1273,7 +1273,7 @@ if _show_welcome:
 <p style="margin:0 0 16px 0; font-size:14px; color:#65657B; line-height:1.6;">
     <strong>Life Sciences Data Viewer</strong> lets you explore and visualise life sciences 
     datasets stored in Domino — directly from any project sidebar. Select a dataset below 
-    to browse its files, then click <strong>Load File</strong> to open it.
+    to browse its files — select a file to open it instantly.
 </p>
 <p style="margin:0 0 10px 0; font-size:13px; font-weight:600; color:#2E2E38;">Supported formats</p>
 <div style="display:flex; flex-wrap:wrap; gap:8px;">
@@ -1435,25 +1435,28 @@ if project_id:
     size_kb = selected_file_entry["size_bytes"] // 1024
     st.caption(f"📄 `{selected_file_path}` — {size_kb:,} KB")
 
-    # Clear cached file if user selects a different file
+    # Auto-load on file selection change
     if st.session_state.get("loaded_file_path") != selected_file_path:
+        # Clear stale cache for previous file
         for k in ["loaded_file_bytes", "loaded_file_path", "dicom_bytes", "dicom_bytes_id"]:
             st.session_state.pop(k, None)
 
-    if st.button("Load File", type="primary"):
-        with st.spinner(f"Downloading via API…"):
+        # Warn for large files but still auto-load
+        size_mb = selected_file_entry["size_bytes"] / 1024 / 1024
+        if size_mb > 50:
+            st.info(f"Large file ({size_mb:.0f} MB) — loading, please wait…")
+
+        with st.spinner(f"Loading `{os.path.basename(selected_file_path)}`…"):
             file_bytes = download_snapshot_file(snapshot_id, selected_file_path, api_token)
 
         if not file_bytes:
             st.error("Download failed. Check that you have access to this dataset.")
             st.stop()
 
-        # Store in session state so reruns (windowing sliders/presets) don't re-download
         st.session_state.loaded_file_bytes = file_bytes
         st.session_state.loaded_file_path  = selected_file_path
-        st.success(f"Downloaded {len(file_bytes):,} bytes")
 
-    # Use cached bytes if already downloaded
+    # Use cached bytes
     file_bytes = st.session_state.get("loaded_file_bytes")
     if not file_bytes:
         st.stop()
